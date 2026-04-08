@@ -97,6 +97,7 @@ def health() -> Dict[str, str]:
 
 
 @app.post("/verify-license-face")
+@app.post("/face-match")
 async def verify_license_face(
     license_image: UploadFile = File(...),
     selfie_front: UploadFile = File(...),
@@ -145,5 +146,52 @@ async def verify_license_face(
             "left": {"detected_pose": left_pose, **left_pose_meta},
             "right": {"detected_pose": right_pose, **right_pose_meta},
         },
+        "recommendation": "accept" if match else "reject",
+    }
+
+
+@app.post("/verify")
+@app.post("/match")
+@app.post("/api/verify")
+@app.post("/api/match")
+@app.post("/api/face-match")
+async def verify_simple_face_match(
+    licence: UploadFile = File(...),
+    liveScan: UploadFile | None = File(default=None),
+    selfie: UploadFile | None = File(default=None),
+    image: UploadFile | None = File(default=None),
+    threshold: float = Form(0.55),
+) -> Dict[str, object]:
+    """
+    Compatibility endpoint for clients that send:
+      - licence + liveScan (preferred), or
+      - licence + selfie/image
+    Returns a simple match payload expected by frontend integrations.
+    """
+    if threshold <= 0 or threshold >= 1:
+        raise HTTPException(status_code=400, detail="Threshold must be between 0 and 1.")
+
+    probe = liveScan or selfie or image
+    if probe is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing live scan image. Provide one of: liveScan, selfie, image.",
+        )
+
+    license_bgr = _read_upload_to_bgr(licence)
+    probe_bgr = _read_upload_to_bgr(probe)
+    license_encoding = _extract_single_encoding(license_bgr, "licence")
+    probe_encoding = _extract_single_encoding(probe_bgr, "liveScan")
+
+    distance = float(face_recognition.face_distance([license_encoding], probe_encoding)[0])
+    similarity = max(0.0, min(1.0, 1.0 - distance))
+    match = distance <= threshold
+
+    return {
+        "match": match,
+        "score": similarity,
+        "similarity": similarity,
+        "distance": distance,
+        "threshold": threshold,
         "recommendation": "accept" if match else "reject",
     }

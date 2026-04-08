@@ -45,6 +45,10 @@ Health check:
 
 `POST /verify-license-face` (multipart/form-data)
 
+Alias endpoint also supported:
+
+`POST /face-match`
+
 Required form fields:
 - `license_image` (file)
 - `selfie_front` (file)
