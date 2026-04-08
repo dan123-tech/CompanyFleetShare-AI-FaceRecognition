@@ -24,13 +24,41 @@ export default async function handler(req) {
     const threshold = String(body.get("threshold") ?? "0.55");
 
     const licenseBaseUrl = process.env.LICENSE_VALIDATOR_URL ?? "http://localhost:8080";
-    const licenseEndpoint = process.env.LICENSE_VALIDATOR_ENDPOINT ?? "/validate-license";
-    const licenseUrl = `${licenseBaseUrl.replace(/\/$/, "")}${licenseEndpoint}`;
-    const licenseForm = new FormData();
-    licenseForm.append("license_image", licenseImage);
+    const configuredLicenseEndpoint = process.env.LICENSE_VALIDATOR_ENDPOINT ?? "/validate-license";
+    const licenseEndpoints = [
+      ...new Set([
+        configuredLicenseEndpoint,
+        "/validate-license",
+        "/validate",
+        "/license/validate",
+        "/driving-licence/validate",
+        "/driving-license/validate",
+      ]),
+    ];
 
-    const licenseResponse = await fetch(licenseUrl, { method: "POST", body: licenseForm });
-    const licenseResult = await licenseResponse.json().catch(() => ({}));
+    let licenseResponse = null;
+    let licenseResult = {};
+    let usedLicenseEndpoint = licenseEndpoints[0];
+
+    for (const endpoint of licenseEndpoints) {
+      const licenseUrl = `${licenseBaseUrl.replace(/\/$/, "")}${endpoint}`;
+      const licenseForm = new FormData();
+      licenseForm.append("license_image", licenseImage);
+
+      const attempt = await fetch(licenseUrl, { method: "POST", body: licenseForm });
+      const attemptJson = await attempt.json().catch(() => ({}));
+      if (attempt.status === 404) continue;
+
+      licenseResponse = attempt;
+      licenseResult = attemptJson;
+      usedLicenseEndpoint = endpoint;
+      break;
+    }
+
+    if (!licenseResponse) {
+      licenseResponse = new Response(null, { status: 404 });
+      licenseResult = { detail: "License endpoint not found on validator service." };
+    }
 
     const faceBaseUrl = process.env.FACE_VALIDATOR_URL ?? "http://localhost:8080";
     const configuredFaceEndpoint = process.env.FACE_VALIDATOR_ENDPOINT ?? "/verify-license-face";
@@ -79,6 +107,7 @@ export default async function handler(req) {
           license_validation: {
             ok: licenseOk,
             status: licenseResponse.status,
+            endpoint_used: usedLicenseEndpoint,
             response: licenseResult,
           },
           face_validation: {

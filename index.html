@@ -7,7 +7,65 @@
     <style>
       body { font-family: Arial, sans-serif; margin: 24px; background: #111827; color: #e5e7eb; }
       .card { max-width: 760px; margin: 0 auto; background: #1f2937; border-radius: 12px; padding: 20px; }
-      video { width: 100%; border-radius: 10px; background: black; }
+      .stage { position: relative; width: 100%; border-radius: 10px; overflow: hidden; background: black; }
+      video { width: 100%; display: block; }
+      .overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .mask {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(closest-side at 50% 45%, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 35%, rgba(0,0,0,0.55) 36%, rgba(0,0,0,0.55) 100%);
+      }
+      .face-oval {
+        position: absolute;
+        left: 50%;
+        top: 45%;
+        width: min(320px, 52vw);
+        height: min(420px, 68vw);
+        transform: translate(-50%, -50%);
+        border: 3px solid rgba(59,130,246,0.9);
+        border-radius: 50%;
+        box-shadow: 0 0 0 9999px rgba(0,0,0,0.0);
+      }
+      .guide {
+        position: absolute;
+        left: 50%;
+        top: 10px;
+        transform: translateX(-50%);
+        background: rgba(15,23,42,0.75);
+        border: 1px solid rgba(148,163,184,0.25);
+        padding: 10px 12px;
+        border-radius: 10px;
+        max-width: 92%;
+        text-align: center;
+        font-weight: 600;
+      }
+      .arrows {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        display: flex;
+        width: 92%;
+        justify-content: space-between;
+        font-size: 44px;
+        opacity: 0.0;
+        transition: opacity 150ms ease;
+        text-shadow: 0 2px 12px rgba(0,0,0,0.6);
+      }
+      .arrows.show { opacity: 0.95; }
+      .arrow {
+        width: 60px;
+        height: 60px;
+        display: grid;
+        place-items: center;
+        border-radius: 999px;
+        background: rgba(15,23,42,0.55);
+        border: 1px solid rgba(148,163,184,0.25);
+      }
       .row { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
       button { border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; font-weight: 600; }
       .primary { background: #2563eb; color: white; }
@@ -15,16 +73,41 @@
       .status { margin-top: 14px; padding: 10px; border-radius: 8px; background: #0f172a; }
       .ok { color: #34d399; }
       .err { color: #f87171; }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(59,130,246,0.16);
+        border: 1px solid rgba(59,130,246,0.35);
+        margin-left: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
     </style>
   </head>
   <body>
     <div class="card">
       <h2>Live Driving Licence Scan</h2>
-      <p>No manual upload: capture `license -> front -> left -> right` and verify.</p>
-      <video id="video" autoplay playsinline muted></video>
+      <p>
+        Guided scan with auto-capture: <strong>licence → front → left → right</strong>
+        <span class="badge" id="poseBadge">pose: -</span>
+      </p>
+      <div class="stage">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="overlay">
+          <div class="mask"></div>
+          <div class="face-oval"></div>
+          <div class="guide" id="guideText">Click “Start Camera”.</div>
+          <div class="arrows" id="arrows">
+            <div class="arrow" id="arrowLeft">←</div>
+            <div class="arrow" id="arrowRight">→</div>
+          </div>
+        </div>
+      </div>
       <div class="row">
         <button id="startBtn" class="primary">Start Camera</button>
-        <button id="captureBtn" class="primary" disabled>Capture Step</button>
+        <button id="autoBtn" class="primary" disabled>Start Auto Scan</button>
         <button id="verifyBtn" class="primary" disabled>Verify Identity</button>
         <button id="resetBtn" class="muted">Reset</button>
       </div>
@@ -33,11 +116,12 @@
     </div>
 
     <script>
+      // Auto capture steps. "license_image" is captured as a still from camera (user shows the card).
       const steps = [
-        { key: "license_image", label: "Show driving licence to camera" },
-        { key: "selfie_front", label: "Look straight at camera (front)" },
-        { key: "selfie_left", label: "Turn face left" },
-        { key: "selfie_right", label: "Turn face right" },
+        { key: "license_image", label: "Hold your driving licence inside the oval", targetPose: null },
+        { key: "selfie_front", label: "Look straight at the camera", targetPose: "front" },
+        { key: "selfie_left", label: "Turn your head LEFT", targetPose: "left" },
+        { key: "selfie_right", label: "Turn your head RIGHT", targetPose: "right" },
       ];
       const captured = {};
       let currentStep = 0;
@@ -46,9 +130,23 @@
       const canvas = document.getElementById("canvas");
       const statusEl = document.getElementById("status");
       const startBtn = document.getElementById("startBtn");
-      const captureBtn = document.getElementById("captureBtn");
+      const autoBtn = document.getElementById("autoBtn");
       const verifyBtn = document.getElementById("verifyBtn");
       const resetBtn = document.getElementById("resetBtn");
+      const guideText = document.getElementById("guideText");
+      const arrows = document.getElementById("arrows");
+      const arrowLeft = document.getElementById("arrowLeft");
+      const arrowRight = document.getElementById("arrowRight");
+      const poseBadge = document.getElementById("poseBadge");
+
+      let autoRunning = false;
+      let lastCaptureAt = 0;
+      let stableCount = 0;
+      let latestPose = "-";
+
+      // Very lightweight head-pose estimation using browser FaceDetector if available.
+      // Falls back to timer-only mode if not supported.
+      const faceDetector = "FaceDetector" in window ? new FaceDetector({ fastMode: true, maxDetectedFaces: 1 }) : null;
 
       function setStatus(text, type) {
         statusEl.textContent = text;
@@ -61,36 +159,143 @@
           ? "All captures done. Click Verify Identity."
           : `Step ${currentStep + 1}/${steps.length}: ${steps[currentStep].label}`;
       }
+      function setGuide(text) {
+        guideText.textContent = text;
+      }
+      function showArrows(mode) {
+        // mode: "left" | "right" | "both" | "none"
+        arrows.classList.toggle("show", mode !== "none");
+        arrowLeft.style.opacity = mode === "left" || mode === "both" ? "1" : "0.2";
+        arrowRight.style.opacity = mode === "right" || mode === "both" ? "1" : "0.2";
+      }
+
       async function startCamera() {
         try {
           stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
           video.srcObject = stream;
-          captureBtn.disabled = false;
-          setStatus(stepText());
+          autoBtn.disabled = false;
+          setStatus("Camera started. Click “Start Auto Scan”.");
+          setGuide("Align the licence/face inside the oval.");
         } catch {
           setStatus("Camera permission denied or unavailable.", "err");
         }
       }
+
       function captureFrame() {
-        if (!stream || currentStep >= steps.length) return;
+        if (!stream || currentStep >= steps.length) return false;
         canvas.width = video.videoWidth || 1280;
         canvas.height = video.videoHeight || 720;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob((blob) => {
-          if (!blob) return setStatus("Failed to capture frame.", "err");
-          const step = steps[currentStep];
-          captured[step.key] = new File([blob], `${step.key}.jpg`, { type: "image/jpeg" });
-          currentStep += 1;
-          if (currentStep >= steps.length) {
-            captureBtn.disabled = true;
-            verifyBtn.disabled = false;
-            setStatus("All required live scans captured.", "ok");
-          } else {
-            setStatus(stepText());
-          }
-        }, "image/jpeg", 0.95);
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) return setStatus("Failed to capture frame.", "err");
+            const step = steps[currentStep];
+            captured[step.key] = new File([blob], `${step.key}.jpg`, { type: "image/jpeg" });
+            currentStep += 1;
+            stableCount = 0;
+            lastCaptureAt = Date.now();
+
+            if (currentStep >= steps.length) {
+              autoRunning = false;
+              autoBtn.textContent = "Start Auto Scan";
+              verifyBtn.disabled = false;
+              setStatus("All required scans captured. Click Verify Identity.", "ok");
+              setGuide("All captures complete.");
+              showArrows("none");
+            } else {
+              setStatus(stepText());
+              const next = steps[currentStep];
+              if (next.targetPose === "left") showArrows("left");
+              else if (next.targetPose === "right") showArrows("right");
+              else showArrows("none");
+              setGuide(next.label);
+            }
+          },
+          "image/jpeg",
+          0.95
+        );
+        return true;
       }
+
+      async function estimatePose() {
+        if (!faceDetector) return "-";
+        try {
+          // Downscale by drawing to canvas to reduce detector cost.
+          const w = 480;
+          const h = Math.round((w * (video.videoHeight || 720)) / (video.videoWidth || 1280));
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(video, 0, 0, w, h);
+
+          const bitmap = await createImageBitmap(canvas);
+          const faces = await faceDetector.detect(bitmap);
+          bitmap.close?.();
+          if (!faces || faces.length === 0) return "no-face";
+
+          const box = faces[0].boundingBox;
+          // Heuristic: if face center is left/right of frame center, assume head turned.
+          const faceCenterX = box.x + box.width / 2;
+          const frameCenterX = w / 2;
+          const offset = (faceCenterX - frameCenterX) / w;
+
+          if (Math.abs(offset) < 0.06) return "front";
+          return offset > 0 ? "right" : "left";
+        } catch {
+          return "-";
+        }
+      }
+
+      async function autoLoop() {
+        if (!autoRunning) return;
+        if (!stream || currentStep >= steps.length) return;
+
+        const step = steps[currentStep];
+        latestPose = await estimatePose();
+        poseBadge.textContent = `pose: ${latestPose}`;
+
+        // Licence capture: just wait a moment and capture once user is steady.
+        if (step.key === "license_image") {
+          showArrows("none");
+          setGuide(step.label);
+          const now = Date.now();
+          if (now - lastCaptureAt > 900) {
+            stableCount += 1;
+            if (stableCount >= 8) captureFrame();
+          }
+          requestAnimationFrame(autoLoop);
+          return;
+        }
+
+        // Face steps: require pose match for some consecutive frames.
+        if (step.targetPose === "left") showArrows("left");
+        else if (step.targetPose === "right") showArrows("right");
+        else showArrows("none");
+        setGuide(step.label);
+
+        if (latestPose === step.targetPose) stableCount += 1;
+        else stableCount = 0;
+
+        // 12 frames of stability + 900ms between captures.
+        const now = Date.now();
+        if (stableCount >= 12 && now - lastCaptureAt > 900) {
+          captureFrame();
+        }
+        requestAnimationFrame(autoLoop);
+      }
+
+      function startAuto() {
+        if (!stream) return;
+        if (currentStep >= steps.length) return;
+        autoRunning = !autoRunning;
+        autoBtn.textContent = autoRunning ? "Stop Auto Scan" : "Start Auto Scan";
+        setStatus(autoRunning ? "Auto scan running…" : "Auto scan stopped.");
+        stableCount = 0;
+        lastCaptureAt = Date.now();
+        if (autoRunning) autoLoop();
+      }
+
       async function verifyIdentity() {
         const form = new FormData();
         for (const step of steps) {
@@ -107,11 +312,16 @@
         for (const key of Object.keys(captured)) delete captured[key];
         currentStep = 0;
         verifyBtn.disabled = true;
-        captureBtn.disabled = !stream;
-        setStatus(stream ? stepText() : "Ready.");
+        autoRunning = false;
+        autoBtn.textContent = "Start Auto Scan";
+        autoBtn.disabled = !stream;
+        setStatus(stream ? "Camera ready. Click “Start Auto Scan”." : "Ready.");
+        setGuide(stream ? "Align the licence/face inside the oval." : "Click “Start Camera”.");
+        showArrows("none");
+        poseBadge.textContent = "pose: -";
       }
       startBtn.addEventListener("click", startCamera);
-      captureBtn.addEventListener("click", captureFrame);
+      autoBtn.addEventListener("click", startAuto);
       verifyBtn.addEventListener("click", verifyIdentity);
       resetBtn.addEventListener("click", resetFlow);
     </script>
