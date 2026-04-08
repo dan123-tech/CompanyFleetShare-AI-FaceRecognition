@@ -63,6 +63,44 @@ curl -X POST "http://localhost:8080/verify-license-face" \
   -F "threshold=0.55"
 ```
 
+## Live scan (no manual photo upload)
+
+If you do not want file upload inputs, use webcam live capture:
+
+- Open `vercel_example/live_scan.html`
+- It captures in sequence: `license_image` -> `selfie_front` -> `selfie_left` -> `selfie_right`
+- It sends frames directly to `/api/verify-license` (your main backend orchestrator)
+
+This is still multipart under the hood, but the user does not upload photos manually.
+
+## Main backend orchestration flow
+
+`vercel_example/route.ts` now matches your requested logic:
+
+1. User provides licence image + live face scan frames
+2. Main backend sends licence image to **Driving Licence Validator**
+3. Main backend sends licence + front/left/right frames to **Face Recognition**
+4. Main backend merges both results and returns one final decision
+
+Environment variables for this route:
+
+- `LICENSE_VALIDATOR_URL` (default `http://localhost:8080`)
+- `LICENSE_VALIDATOR_ENDPOINT` (default `/validate-license`)
+- `FACE_VALIDATOR_URL` (default `http://localhost:8080`)
+- `FACE_VALIDATOR_ENDPOINT` (default `/verify-license-face`)
+
+Example merged response:
+
+```json
+{
+  "final_decision": "approved",
+  "checks": {
+    "license_validation": { "ok": true, "status": 200, "response": {} },
+    "face_validation": { "ok": true, "status": 200, "response": { "match": true } }
+  }
+}
+```
+
 ## Important for Vercel
 
 Vercel serverless functions cannot call `localhost` inside your machine.

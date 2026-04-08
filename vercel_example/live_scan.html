@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Live License Face Scan</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 24px;
+        background: #111827;
+        color: #e5e7eb;
+      }
+      .card {
+        max-width: 760px;
+        margin: 0 auto;
+        background: #1f2937;
+        border-radius: 12px;
+        padding: 20px;
+      }
+      video {
+        width: 100%;
+        border-radius: 10px;
+        background: black;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        margin-top: 12px;
+        flex-wrap: wrap;
+      }
+      button {
+        border: 0;
+        border-radius: 8px;
+        padding: 10px 14px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .primary {
+        background: #2563eb;
+        color: white;
+      }
+      .muted {
+        background: #374151;
+        color: #f3f4f6;
+      }
+      .status {
+        margin-top: 14px;
+        padding: 10px;
+        border-radius: 8px;
+        background: #0f172a;
+      }
+      .ok {
+        color: #34d399;
+      }
+      .err {
+        color: #f87171;
+      }
+      .hint {
+        opacity: 0.9;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h2>Live Driving Licence Scan</h2>
+      <p class="hint">
+        No photo upload. The user is scanned live in this order:
+        <strong>licence -> front -> left -> right</strong>.
+      </p>
+      <video id="video" autoplay playsinline muted></video>
+      <div class="row">
+        <button id="startBtn" class="primary">Start Camera</button>
+        <button id="captureBtn" class="primary" disabled>Capture Step</button>
+        <button id="verifyBtn" class="primary" disabled>Verify Identity</button>
+        <button id="resetBtn" class="muted">Reset</button>
+      </div>
+      <div id="status" class="status">Ready.</div>
+      <canvas id="canvas" style="display: none"></canvas>
+    </div>
+
+    <script>
+      const steps = [
+        { key: "license_image", label: "Show driving licence to camera" },
+        { key: "selfie_front", label: "Look straight at camera (front)" },
+        { key: "selfie_left", label: "Turn face left" },
+        { key: "selfie_right", label: "Turn face right" },
+      ];
+
+      const captured = {};
+      let currentStep = 0;
+      let stream = null;
+
+      const video = document.getElementById("video");
+      const canvas = document.getElementById("canvas");
+      const statusEl = document.getElementById("status");
+      const startBtn = document.getElementById("startBtn");
+      const captureBtn = document.getElementById("captureBtn");
+      const verifyBtn = document.getElementById("verifyBtn");
+      const resetBtn = document.getElementById("resetBtn");
+
+      function setStatus(text, type) {
+        statusEl.textContent = text;
+        statusEl.className = "status";
+        if (type === "ok") statusEl.classList.add("ok");
+        if (type === "err") statusEl.classList.add("err");
+      }
+
+      function stepText() {
+        if (currentStep >= steps.length) return "All captures done. Click Verify Identity.";
+        return `Step ${currentStep + 1}/${steps.length}: ${steps[currentStep].label}`;
+      }
+
+      async function startCamera() {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false,
+          });
+          video.srcObject = stream;
+          captureBtn.disabled = false;
+          setStatus(stepText());
+        } catch {
+          setStatus("Camera permission denied or camera not available.", "err");
+        }
+      }
+
+      function captureFrame() {
+        if (!stream || currentStep >= steps.length) return;
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 720;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              setStatus("Failed to capture frame.", "err");
+              return;
+            }
+            const step = steps[currentStep];
+            captured[step.key] = new File([blob], `${step.key}.jpg`, { type: "image/jpeg" });
+            currentStep += 1;
+            if (currentStep >= steps.length) {
+              captureBtn.disabled = true;
+              verifyBtn.disabled = false;
+              setStatus("All required live scans captured.", "ok");
+            } else {
+              setStatus(stepText());
+            }
+          },
+          "image/jpeg",
+          0.95
+        );
+      }
+
+      async function verifyIdentity() {
+        try {
+          const form = new FormData();
+          for (const step of steps) {
+            if (!captured[step.key]) {
+              setStatus(`Missing capture: ${step.label}`, "err");
+              return;
+            }
+            form.append(step.key, captured[step.key]);
+          }
+          form.append("threshold", "0.55");
+
+          // In Next.js, expose this as /api/verify-license using vercel_example/route.ts logic.
+          const res = await fetch("/api/verify-license", { method: "POST", body: form });
+          const data = await res.json();
+          if (!res.ok) {
+            setStatus(`Verification failed: ${data?.detail || data?.error || "Unknown error"}`, "err");
+            return;
+          }
+          setStatus(`Final decision: ${data.final_decision || "unknown"}`, "ok");
+          console.log("Verification response:", data);
+        } catch {
+          setStatus("Unexpected verification error.", "err");
+        }
+      }
+
+      function resetFlow() {
+        for (const key of Object.keys(captured)) delete captured[key];
+        currentStep = 0;
+        verifyBtn.disabled = true;
+        captureBtn.disabled = !stream;
+        setStatus(stream ? stepText() : "Ready.");
+      }
+
+      startBtn.addEventListener("click", startCamera);
+      captureBtn.addEventListener("click", captureFrame);
+      verifyBtn.addEventListener("click", verifyIdentity);
+      resetBtn.addEventListener("click", resetFlow);
+    </script>
+  </body>
+</html>
