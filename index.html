@@ -155,11 +155,15 @@
       let hasFace = false;
       let yawSmoothed = 0;
       let lastPoseUpdateAt = 0;
+      let yawNeutral = 0;
+      let neutralSamples = 0;
 
       const POSE_UPDATE_MS = 90; // throttle for performance
       const YAW_ALPHA = 0.35; // smoothing factor
-      const YAW_FRONT_MAX = 0.08;
-      const YAW_TURN_MIN = 0.16;
+      // thresholds in degrees (after neutral calibration)
+      // Slightly relaxed turn threshold for better UX.
+      const YAW_FRONT_MAX_DEG = 12;
+      const YAW_TURN_MIN_DEG = 14;
 
       function setStatus(text, type) {
         statusEl.textContent = text;
@@ -184,23 +188,53 @@
 
       function classifyPoseFromYaw(yaw) {
         if (!hasFace) return "no-face";
-        if (Math.abs(yaw) <= YAW_FRONT_MAX) return "front";
-        if (yaw >= YAW_TURN_MIN) return "right";
-        if (yaw <= -YAW_TURN_MIN) return "left";
+        if (Math.abs(yaw) <= YAW_FRONT_MAX_DEG) return "front";
+        if (yaw >= YAW_TURN_MIN_DEG) return "right";
+        if (yaw <= -YAW_TURN_MIN_DEG) return "left";
         return "moving";
       }
 
-      function computeYawFromLandmarks(lm) {
-        // Heuristic using 3D landmarks:
-        // Compare nose direction relative to mid-eye line.
-        // Indices: 1 (nose tip), 33 (left eye outer), 263 (right eye outer)
-        const nose = lm[1];
+      function vsub(a, b) {
+        return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+      }
+      function vcross(a, b) {
+        return {
+          x: a.y * b.z - a.z * b.y,
+          y: a.z * b.x - a.x * b.z,
+          z: a.x * b.y - a.y * b.x,
+        };
+      }
+      function vnorm(a) {
+        const n = Math.hypot(a.x, a.y, a.z) + 1e-9;
+        return { x: a.x / n, y: a.y / n, z: a.z / n };
+      }
+
+      function computeYawDegFromLandmarks(lm) {
+        // More robust pose estimate from face plane normal using 3D landmarks.
+        // Landmarks (FaceMesh):
+        // 33  = left eye outer corner
+        // 263 = right eye outer corner
+        // 1   = nose tip
+        // 152 = chin
         const le = lm[33];
         const re = lm[263];
-        const midX = (le.x + re.x) / 2;
-        const eyeDx = Math.abs(le.x - re.x) + 1e-6;
-        // Normalize: positive yaw means face turned right (from camera POV)
-        return (nose.x - midX) / eyeDx;
+        const nose = lm[1];
+        const chin = lm[152];
+
+        // Build two vectors on the face plane.
+        const eyeVec = vsub(re, le);
+        const noseToChin = vsub(chin, nose);
+
+        // Face normal (direction depends on coordinate system).
+        const n = vnorm(vcross(eyeVec, noseToChin));
+
+        // Convert normal to yaw estimate.
+        // In MediaPipe coordinates, z is roughly "towards camera" (often negative),
+        // so we use atan2 on x vs z magnitude for stability.
+        // Flip sign to match user-facing (mirrored) camera expectation:
+        // turning your head LEFT should produce "left".
+        const yawRad = Math.atan2(-n.x, Math.abs(n.z) + 1e-6);
+        return (yawRad * 180) / Math.PI;
       }
 
       async function startCamera() {
@@ -236,10 +270,19 @@
                 return;
               }
 
-              const yaw = computeYawFromLandmarks(faces[0]);
-              yawSmoothed = yawSmoothed * (1 - YAW_ALPHA) + yaw * YAW_ALPHA;
-              latestPose = classifyPoseFromYaw(yawSmoothed);
-              poseBadge.textContent = `pose: ${latestPose}`;
+              const yawDeg = computeYawDegFromLandmarks(faces[0]);
+              yawSmoothed = yawSmoothed * (1 - YAW_ALPHA) + yawDeg * YAW_ALPHA;
+
+              // Neutral calibration when the user is supposed to be front.
+              const step = steps[currentStep];
+              if (step && step.targetPose === "front" && neutralSamples < 18) {
+                yawNeutral = yawNeutral * 0.7 + yawSmoothed * 0.3;
+                neutralSamples += 1;
+              }
+
+              const yawCalibrated = yawSmoothed - yawNeutral;
+              latestPose = classifyPoseFromYaw(yawCalibrated);
+              poseBadge.textContent = `pose: ${latestPose} (yaw ${yawCalibrated.toFixed(0)}°)`;
             });
           }
 
