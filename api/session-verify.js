@@ -10,7 +10,7 @@ function json(payload, status) {
 function withCors(res) {
   res.headers.set("Access-Control-Allow-Origin", "*");
   res.headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.headers.set("Access-Control-Allow-Headers", "content-type");
+  res.headers.set("Access-Control-Allow-Headers", "content-type, authorization");
   return res;
 }
 
@@ -35,6 +35,58 @@ function base64ToBlob(b64, contentType) {
   return new Blob([bytes], { type: contentType || "image/jpeg" });
 }
 
+/** Supports multipart/form-data, application/x-www-form-urlencoded, or application/json. */
+async function parseVerifyBody(req) {
+  const ct = (req.headers.get("content-type") || "").toLowerCase();
+  let sessionId = null;
+  let selfie = null;
+  let threshold = "0.55";
+
+  if (ct.includes("application/json")) {
+    const body = await req.json();
+    sessionId = body.session_id ?? body.sessionId;
+    threshold = String(body.threshold ?? "0.55");
+    const dataUrl = body.selfie_image;
+    const b64 = body.selfie_image_base64 ?? body.selfie_base64 ?? body.image_base64;
+    const mime = body.selfie_mime ?? body.selfie_type ?? "image/jpeg";
+    if (typeof dataUrl === "string" && dataUrl.startsWith("data:")) {
+      const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (m) {
+        selfie = new File([base64ToBlob(m[2], m[1])], "selfie.jpg", { type: m[1] });
+      }
+    } else if (typeof b64 === "string" && b64.length > 0) {
+      selfie = new File([base64ToBlob(b64, mime)], "selfie.jpg", { type: mime });
+    }
+    return { sessionId, selfie, threshold };
+  }
+
+  if (ct.includes("multipart/form-data") || ct.includes("application/x-www-form-urlencoded")) {
+    const form = await req.formData();
+    sessionId = form.get("session_id");
+    selfie = form.get("selfie_image");
+    threshold = String(form.get("threshold") ?? "0.55");
+    return { sessionId, selfie, threshold };
+  }
+
+  // Some clients omit or mis-set Content-Type; try formData once (may throw).
+  try {
+    const form = await req.formData();
+    sessionId = form.get("session_id");
+    selfie = form.get("selfie_image");
+    threshold = String(form.get("threshold") ?? "0.55");
+    if (sessionId != null && sessionId !== "" && selfie != null) {
+      return { sessionId, selfie, threshold };
+    }
+  } catch {
+    // fall through
+  }
+
+  throw new Error(
+    "Unsupported Content-Type. Use multipart/form-data (fields: session_id, selfie_image) or application/json " +
+      "(fields: session_id, selfie_image_base64 or data-URL selfie_image, optional selfie_mime, threshold)."
+  );
+}
+
 export default async function handler(req) {
   if (req.method === "OPTIONS") {
     return withCors(new Response(null, { status: 204 }));
@@ -42,12 +94,9 @@ export default async function handler(req) {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
-    const form = await req.formData();
-    const sessionId = form.get("session_id");
-    const selfie = form.get("selfie_image");
-    const threshold = String(form.get("threshold") ?? "0.55");
+    const { sessionId, selfie, threshold } = await parseVerifyBody(req);
     if (!sessionId) return withCors(json({ error: "Missing session_id" }, 400));
-    if (!selfie) return withCors(json({ error: "Missing selfie_image" }, 400));
+    if (!selfie) return withCors(json({ error: "Missing selfie_image (or selfie_image_base64 in JSON)" }, 400));
 
     const raw = await upstashGet(`session:${sessionId}`);
     if (!raw) return withCors(json({ error: "Session not found or expired" }, 404));

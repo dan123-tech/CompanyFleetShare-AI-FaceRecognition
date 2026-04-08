@@ -130,13 +130,14 @@ This repo also contains **API-only** endpoints (no UI) that your main app can us
 
 Endpoints:
 
-- `POST /api/session-create` (multipart/form-data)
-  - `license_image` (file)
+- `POST /api/session-create`
+  - **multipart/form-data**: `license_image` (file)
+  - **or** `Content-Type: application/json`: `license_image_base64` (string), optional `license_mime` (default `image/jpeg`), or `license_image` as a `data:image/...;base64,...` data URL
   - returns `{ session_id, expires_in_seconds }`
 
-- `POST /api/session-verify` (multipart/form-data)
-  - `session_id` (string)
-  - `selfie_image` (file)
+- `POST /api/session-verify`
+  - **multipart/form-data**: `session_id`, `selfie_image` (file), optional `threshold`
+  - **or** `Content-Type: application/json`: `session_id`, `selfie_image_base64` (or `selfie_image` data URL), optional `selfie_mime`, `threshold`
   - returns `{ ok, status, endpoint_used, response }`
 
 Required Vercel env vars for these endpoints:

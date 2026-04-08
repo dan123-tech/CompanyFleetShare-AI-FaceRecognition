@@ -10,7 +10,7 @@ function json(payload, status) {
 function withCors(res) {
   res.headers.set("Access-Control-Allow-Origin", "*");
   res.headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.headers.set("Access-Control-Allow-Headers", "content-type");
+  res.headers.set("Access-Control-Allow-Headers", "content-type, authorization");
   return res;
 }
 
@@ -45,6 +45,54 @@ function randomId() {
   return crypto.randomUUID().replace(/-/g, "");
 }
 
+function base64ToBlob(b64, contentType) {
+  const bin = atob(b64);
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: contentType || "image/jpeg" });
+}
+
+/** Supports multipart/form-data, application/x-www-form-urlencoded, or application/json. */
+async function parseCreateBody(req) {
+  const ct = (req.headers.get("content-type") || "").toLowerCase();
+
+  if (ct.includes("application/json")) {
+    const body = await req.json();
+    const dataUrl = body.license_image;
+    const b64 = body.license_image_base64 ?? body.license_base64 ?? body.image_base64;
+    const mime = body.license_mime ?? body.license_type ?? "image/jpeg";
+    if (typeof dataUrl === "string" && dataUrl.startsWith("data:")) {
+      const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (m) {
+        return new File([base64ToBlob(m[2], m[1])], "license.jpg", { type: m[1] });
+      }
+    }
+    if (typeof b64 === "string" && b64.length > 0) {
+      return new File([base64ToBlob(b64, mime)], "license.jpg", { type: mime });
+    }
+    return null;
+  }
+
+  if (ct.includes("multipart/form-data") || ct.includes("application/x-www-form-urlencoded")) {
+    const form = await req.formData();
+    return form.get("license_image");
+  }
+
+  try {
+    const form = await req.formData();
+    const f = form.get("license_image");
+    if (f) return f;
+  } catch {
+    // ignore
+  }
+
+  throw new Error(
+    "Unsupported Content-Type. Use multipart/form-data (field: license_image) or application/json " +
+      "(fields: license_image_base64 or data-URL license_image, optional license_mime)."
+  );
+}
+
 export default async function handler(req) {
   if (req.method === "OPTIONS") {
     return withCors(new Response(null, { status: 204 }));
@@ -52,9 +100,8 @@ export default async function handler(req) {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
-    const form = await req.formData();
-    const licenseImage = form.get("license_image");
-    if (!licenseImage) return json({ error: "Missing license_image" }, 400);
+    const licenseImage = await parseCreateBody(req);
+    if (!licenseImage) return withCors(json({ error: "Missing license_image" }, 400));
 
     const sessionId = randomId();
     const b64 = await fileToBase64(licenseImage);
