@@ -18,10 +18,38 @@
         border-radius: 12px;
         padding: 20px;
       }
+      .camera-wrap {
+        position: relative;
+      }
       video {
         width: 100%;
         border-radius: 10px;
         background: black;
+      }
+      .face-guide {
+        pointer-events: none;
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .face-guide-circle {
+        width: 240px;
+        height: 240px;
+        border-radius: 999px;
+        border: 4px solid rgba(255, 255, 255, 0.95);
+        box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.42);
+      }
+      .face-guide-text {
+        position: absolute;
+        bottom: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 12px;
+        background: rgba(0, 0, 0, 0.55);
+        border-radius: 999px;
+        padding: 6px 10px;
       }
       .row {
         display: flex;
@@ -68,7 +96,13 @@
         No photo upload. The user is scanned live in this order:
         <strong>licence -> front -> left -> right</strong>.
       </p>
-      <video id="video" autoplay playsinline muted></video>
+      <div class="camera-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="face-guide">
+          <div class="face-guide-circle"></div>
+          <div class="face-guide-text">Place your face inside the circle</div>
+        </div>
+      </div>
       <div class="row">
         <button id="startBtn" class="primary">Start Camera</button>
         <button id="captureBtn" class="primary" disabled>Capture Step</button>

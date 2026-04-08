@@ -18,8 +18,15 @@ This uses fully free/open-source libraries:
 
 No paid cloud API is required.
 
+## FaceRecognition folder and Vercel
+
+The `FaceRecognition/` Python API (dlib, MediaPipe, OpenCV) **cannot** run on Vercel serverless: total install size is far above the ~500 MB limit. Deploy it with **Docker** (Render, Railway, Fly.io, VPS) and set `FACE_VALIDATOR_URL` on your Vercel API project to that public URL.
+
+If you link a Vercel project to `FaceRecognition/`, it deploys only a **static** `index.html` plus `.vercelignore` so heavy files are not bundled.
+
 ## Project structure
 
+- `FaceRecognition/` - Python face API + Dockerfile (host on Docker, not Vercel Python)
 - `ai_driving_licence_validator/app.py` - Python API script
 - `ai_driving_licence_validator/Dockerfile` - Validator container
 - `docker-compose.yml` - Two-container communication example

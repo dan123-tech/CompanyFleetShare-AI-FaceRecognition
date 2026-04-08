@@ -1,0 +1,9 @@
+# Keep Vercel deploy tiny (static landing only). Python + ML deps exceed Lambda limits — use Docker for the API.
+__pycache__
+*.pyc
+.venv
+requirements.txt
+app.py
+main.py
+Dockerfile
+.git

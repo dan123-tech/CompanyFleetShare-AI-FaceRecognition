@@ -96,13 +96,52 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/")
+def health_root() -> Dict[str, str]:
+    return {"status": "ok", "service": "face-recognition-validator"}
+
+
+@app.get("/api/health")
+def health_api() -> Dict[str, str]:
+    return {"status": "ok"}
+
+
+def _single_face_match_response(
+    licence_upload: UploadFile,
+    probe_upload: UploadFile,
+    threshold: float,
+) -> Dict[str, object]:
+    license_bgr = _read_upload_to_bgr(licence_upload)
+    probe_bgr = _read_upload_to_bgr(probe_upload)
+    license_encoding = _extract_single_encoding(license_bgr, "licence")
+    probe_encoding = _extract_single_encoding(probe_bgr, "liveScan")
+
+    distance = float(face_recognition.face_distance([license_encoding], probe_encoding)[0])
+    similarity = max(0.0, min(1.0, 1.0 - distance))
+    match = distance <= threshold
+
+    return {
+        "match": match,
+        "score": similarity,
+        "similarity": similarity,
+        "distance": distance,
+        "threshold": threshold,
+        "recommendation": "accept" if match else "reject",
+    }
+
+
 @app.post("/verify-license-face")
 @app.post("/face-match")
+@app.post("/api/verify-license-face")
 async def verify_license_face(
-    license_image: UploadFile = File(...),
-    selfie_front: UploadFile = File(...),
-    selfie_left: UploadFile = File(...),
-    selfie_right: UploadFile = File(...),
+    license_image: UploadFile | None = File(default=None),
+    licence: UploadFile | None = File(default=None),
+    selfie_front: UploadFile | None = File(default=None),
+    selfie_left: UploadFile | None = File(default=None),
+    selfie_right: UploadFile | None = File(default=None),
+    liveScan: UploadFile | None = File(default=None),
+    selfie: UploadFile | None = File(default=None),
+    image: UploadFile | None = File(default=None),
     threshold: float = Form(0.55),
 ) -> Dict[str, object]:
     """
@@ -113,7 +152,30 @@ async def verify_license_face(
     if threshold <= 0 or threshold >= 1:
         raise HTTPException(status_code=400, detail="Threshold must be between 0 and 1.")
 
-    license_bgr = _read_upload_to_bgr(license_image)
+    licence_upload = license_image or licence
+    if licence_upload is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing licence image. Provide one of: license_image, licence.",
+        )
+
+    # Compatibility mode: if caller provides only one selfie (liveScan/selfie/image),
+    # run simple one-to-one face match on this endpoint too.
+    probe_single = liveScan or selfie or image
+    has_three_angles = selfie_front is not None and selfie_left is not None and selfie_right is not None
+    if not has_three_angles:
+        if probe_single is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Missing selfie input. Provide either all three "
+                    "(selfie_front, selfie_left, selfie_right) or one of "
+                    "(liveScan, selfie, image)."
+                ),
+            )
+        return _single_face_match_response(licence_upload, probe_single, threshold)
+
+    license_bgr = _read_upload_to_bgr(licence_upload)
     front_bgr = _read_upload_to_bgr(selfie_front)
     left_bgr = _read_upload_to_bgr(selfie_left)
     right_bgr = _read_upload_to_bgr(selfie_right)
@@ -178,20 +240,4 @@ async def verify_simple_face_match(
             detail="Missing live scan image. Provide one of: liveScan, selfie, image.",
         )
 
-    license_bgr = _read_upload_to_bgr(licence)
-    probe_bgr = _read_upload_to_bgr(probe)
-    license_encoding = _extract_single_encoding(license_bgr, "licence")
-    probe_encoding = _extract_single_encoding(probe_bgr, "liveScan")
-
-    distance = float(face_recognition.face_distance([license_encoding], probe_encoding)[0])
-    similarity = max(0.0, min(1.0, 1.0 - distance))
-    match = distance <= threshold
-
-    return {
-        "match": match,
-        "score": similarity,
-        "similarity": similarity,
-        "distance": distance,
-        "threshold": threshold,
-        "recommendation": "accept" if match else "reject",
-    }
+    return _single_face_match_response(licence, probe, threshold)

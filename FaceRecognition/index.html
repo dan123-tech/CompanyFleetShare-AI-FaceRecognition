@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Face recognition API (Docker only)</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; line-height: 1.5; }
+      code { background: #f4f4f5; padding: 2px 6px; border-radius: 4px; }
+      .warn { background: #fef3c7; border: 1px solid #f59e0b; padding: 12px; border-radius: 8px; margin: 16px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Face recognition service</h1>
+    <div class="warn">
+      <strong>Not runnable on Vercel serverless.</strong> Dependencies (dlib, MediaPipe, OpenCV) exceed the
+      ~500 MB Lambda limit. Deploy this folder with <strong>Docker</strong> instead (Render, Railway, Fly.io, VPS).
+    </div>
+    <p>Use the included <code>Dockerfile</code>:</p>
+    <pre><code>docker build -t face-api .
+docker run -p 8000:8000 face-api</code></pre>
+    <p>API runs on port <code>8000</code> (e.g. <code>/match</code>, <code>/verify-license-face</code> per <code>app.py</code>).</p>
+    <p>Point your Vercel <strong>session</strong> project’s <code>FACE_VALIDATOR_URL</code> at this public URL.</p>
+  </body>
+</html>
