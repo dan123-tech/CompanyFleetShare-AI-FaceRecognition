@@ -114,6 +114,30 @@ For production:
 - Set `FACE_VALIDATOR_URL` in Vercel environment variables to:
   `https://your-validator-host`
 
+## API-only “phone handoff” (Veriff-like)
+
+This repo also contains **API-only** endpoints (no UI) that your main app can use to implement:
+- desktop uploads licence image → backend returns `session_id`
+- main app shows QR/email link to phone (your UI)
+- phone captures selfie → main app uploads selfie + `session_id` → backend compares
+
+Endpoints:
+
+- `POST /api/session-create` (multipart/form-data)
+  - `license_image` (file)
+  - returns `{ session_id, expires_in_seconds }`
+
+- `POST /api/session-verify` (multipart/form-data)
+  - `session_id` (string)
+  - `selfie_image` (file)
+  - returns `{ ok, status, endpoint_used, response }`
+
+Required Vercel env vars for these endpoints:
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+- `FACE_VALIDATOR_URL`
+- optional: `FACE_VALIDATOR_ENDPOINT`
+
 ## Security notes
 
 - Add HTTPS and authentication token between your website backend and validator API.
