@@ -158,6 +158,7 @@
       let yawNeutral = 0;
       let neutralSamples = 0;
       let yawCalibratedSmoothed = 0;
+      let yawSign = 1; // auto-calibrated left/right direction
 
       const POSE_UPDATE_MS = 90; // throttle for performance
       const YAW_ALPHA = 0.35; // smoothing factor
@@ -166,6 +167,7 @@
       const YAW_FRONT_MAX_DEG = 12;
       const YAW_TURN_MIN_DEG = 14;
       const YAW_FRONT_CAPTURE_DEG = 16;
+      const YAW_TURN_CAPTURE_DEG = 18;
 
       function setStatus(text, type) {
         statusEl.textContent = text;
@@ -283,8 +285,14 @@
               }
 
               const yawCalibrated = yawSmoothed - yawNeutral;
-              yawCalibratedSmoothed = yawCalibratedSmoothed * (1 - YAW_ALPHA) + yawCalibrated * YAW_ALPHA;
-              latestPose = classifyPoseFromYaw(yawCalibrated);
+              // Auto-calibrate sign based on what the current step expects.
+              const expected = step && step.targetPose ? step.targetPose : null;
+              if (expected === "left" && yawCalibrated > YAW_TURN_MIN_DEG) yawSign = -1;
+              if (expected === "right" && yawCalibrated < -YAW_TURN_MIN_DEG) yawSign = -1;
+
+              const yawEffective = yawSign * yawCalibrated;
+              yawCalibratedSmoothed = yawCalibratedSmoothed * (1 - YAW_ALPHA) + yawEffective * YAW_ALPHA;
+              latestPose = classifyPoseFromYaw(yawCalibratedSmoothed);
               poseBadge.textContent = `pose: ${latestPose} (yaw ${yawCalibratedSmoothed.toFixed(0)}°)`;
             });
           }
@@ -375,9 +383,15 @@
         else showArrows("none");
         setGuide(step.label);
 
-        // Use yaw directly for more reliable "front" detection.
+        // Use yaw directly for more reliable detection (front/left/right).
         if (step.targetPose === "front") {
           if (hasFace && Math.abs(yawCalibratedSmoothed) <= YAW_FRONT_CAPTURE_DEG) stableCount += 1;
+          else stableCount = 0;
+        } else if (step.targetPose === "left") {
+          if (hasFace && yawCalibratedSmoothed <= -YAW_TURN_CAPTURE_DEG) stableCount += 1;
+          else stableCount = 0;
+        } else if (step.targetPose === "right") {
+          if (hasFace && yawCalibratedSmoothed >= YAW_TURN_CAPTURE_DEG) stableCount += 1;
           else stableCount = 0;
         } else {
           if (latestPose === step.targetPose) stableCount += 1;
