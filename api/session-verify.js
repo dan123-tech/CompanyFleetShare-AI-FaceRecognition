@@ -75,7 +75,7 @@ export default async function handler(req) {
     let result = {};
 
     for (const ep of faceEndpoints) {
-      const url = `${faceBaseUrl.replace(/\\/$/, "")}${ep}`;
+      const url = `${faceBaseUrl.replace(/\/$/, "")}${ep}`;
       const faceForm = new FormData();
       faceForm.append("licence", licenseFile);
       faceForm.append("liveScan", selfie);
@@ -94,13 +94,13 @@ export default async function handler(req) {
 
     return withCors(
       json(
-      {
-        ok: resp.ok,
-        status: resp.status,
-        endpoint_used: used,
-        response: result,
-      },
-      200
+        {
+          ok: resp.ok,
+          status: resp.status,
+          endpoint_used: used,
+          response: result,
+        },
+        200
       )
     );
   } catch (e) {
