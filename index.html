@@ -157,6 +157,7 @@
       let lastPoseUpdateAt = 0;
       let yawNeutral = 0;
       let neutralSamples = 0;
+      let yawCalibratedSmoothed = 0;
 
       const POSE_UPDATE_MS = 90; // throttle for performance
       const YAW_ALPHA = 0.35; // smoothing factor
@@ -164,6 +165,7 @@
       // Slightly relaxed turn threshold for better UX.
       const YAW_FRONT_MAX_DEG = 12;
       const YAW_TURN_MIN_DEG = 14;
+      const YAW_FRONT_CAPTURE_DEG = 16;
 
       function setStatus(text, type) {
         statusEl.textContent = text;
@@ -281,8 +283,9 @@
               }
 
               const yawCalibrated = yawSmoothed - yawNeutral;
+              yawCalibratedSmoothed = yawCalibratedSmoothed * (1 - YAW_ALPHA) + yawCalibrated * YAW_ALPHA;
               latestPose = classifyPoseFromYaw(yawCalibrated);
-              poseBadge.textContent = `pose: ${latestPose} (yaw ${yawCalibrated.toFixed(0)}°)`;
+              poseBadge.textContent = `pose: ${latestPose} (yaw ${yawCalibratedSmoothed.toFixed(0)}°)`;
             });
           }
 
@@ -372,9 +375,14 @@
         else showArrows("none");
         setGuide(step.label);
 
-        if (latestPose === step.targetPose) stableCount += 1;
-        else if (latestPose === "moving" || latestPose === "no-face") stableCount = 0;
-        else stableCount = 0;
+        // Use yaw directly for more reliable "front" detection.
+        if (step.targetPose === "front") {
+          if (hasFace && Math.abs(yawCalibratedSmoothed) <= YAW_FRONT_CAPTURE_DEG) stableCount += 1;
+          else stableCount = 0;
+        } else {
+          if (latestPose === step.targetPose) stableCount += 1;
+          else stableCount = 0;
+        }
 
         // 12 frames of stability + 900ms between captures.
         const now = Date.now();
