@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  ai_driving_licence_validator:
+    build:
+      context: ./ai_driving_licence_validator
+    container_name: ai_driving_licence_validator
+    ports:
+      - "8000:8000"
+
+  # Replace this with your own website backend container.
+  website_api:
+    image: node:20-alpine
+    container_name: website_api
+    command: sh -c "sleep infinity"
+    depends_on:
+      - ai_driving_licence_validator
+    environment:
+      # Use this URL from another Docker container.
+      FACE_VALIDATOR_URL: http://ai_driving_licence_validator:8000
