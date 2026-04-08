@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>API Service</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 24px; background: #0b1220; color: #e5e7eb; }
+      .card { max-width: 860px; margin: 0 auto; background: #111827; border: 1px solid rgba(148,163,184,0.15); border-radius: 12px; padding: 18px; }
+      code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 6px; }
+      .small { opacity: 0.85; }
+      a { color: #93c5fd; }
+      ul { margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h2>CompanyFleetShare – Face Verification API</h2>
+      <p class="small">This deployment is <strong>API-only</strong>. Your main app should call these endpoints:</p>
+      <ul>
+        <li><code>POST /api/session-create</code> (form-data: <code>license_image</code>) → returns <code>session_id</code></li>
+        <li><code>POST /api/session-verify</code> (form-data: <code>session_id</code>, <code>selfie_image</code>) → returns match result</li>
+      </ul>
+      <p class="small">If you see a 404 when opening <code>/</code>, it just means there is no UI. This page is here to confirm the deployment is alive.</p>
+    </div>
+  </body>
+</html>
+
